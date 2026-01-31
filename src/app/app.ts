@@ -1,6 +1,7 @@
 import { App } from "@microsoft/teams.apps";
 import { LocalStorage } from "@microsoft/teams.common";
 import { MessageActivity, TokenCredentials } from "@microsoft/teams.api";
+import { CardFactory } from "botbuilder";
 import { ManagedIdentityCredential } from "@azure/identity";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import * as fs from "fs";
@@ -10,7 +11,7 @@ import config from "../config";
 // Create storage for conversation history
 const storage = new LocalStorage();
 
-// Load instructions from file on initialization
+// Load instructions from file
 function loadInstructions(): string {
   const instructionsFilePath = path.join(__dirname, "instructions.txt");
   return fs.readFileSync(instructionsFilePath, "utf-8").trim();
@@ -60,7 +61,7 @@ const app = new App({
 });
 
 // Helper to process with Gemini
-async function processWithGemini(userId: string, conversationKey: string, input: string) {
+async function processWithGemini(conversationKey: string, input: string) {
   const history = storage.get(conversationKey) || [];
   
   const contents = [
@@ -80,49 +81,46 @@ async function processWithGemini(userId: string, conversationKey: string, input:
     parsed = JSON.parse(responseText);
   } catch (e) {
     console.error("Failed to parse Gemini response:", responseText);
-    parsed = { text: responseText, a2ui: null };
+    parsed = { text: responseText, adaptiveCard: null };
   }
 
   // Update history
   history.push({ role: "user", content: input });
-  history.push({ role: "assistant", content: parsed.text });
+  history.push({ role: "assistant", content: JSON.stringify(parsed) });
   storage.set(conversationKey, history);
 
   return parsed;
 }
 
-// Handlers are consolidated above
-
-// Handle A2UI Actions and normal messages
+// Handle messages and Adaptive Card actions
 app.on("message", async ({ send, activity }) => {
   const conversationKey = `${activity.conversation.id}/${activity.from.id}`;
   
   try {
     let input = activity.text;
     
-    // Check if this is an action submission from A2UI
-    if (!input && activity.value && activity.value.action) {
-        input = `User performed action: "${activity.value.action}" with data: ${JSON.stringify(activity.value.data || {})}`;
+    // Handle Adaptive Card Action.Submit data
+    if (!input && activity.value) {
+        input = `User performed action: ${JSON.stringify(activity.value)}`;
     }
 
     if (!input) return;
 
-    const result = await processWithGemini(activity.from.id, conversationKey, input);
+    const result = await processWithGemini(conversationKey, input);
     
     const responseActivity = new MessageActivity(result.text)
       .addAiGenerated()
       .addFeedback();
     
-    if (result.a2ui) {
-        (responseActivity as any).channelData = {
-            ...(responseActivity as any).channelData,
-            a2ui: result.a2ui
-        };
+    // Attach Adaptive Card if present
+    if (result.adaptiveCard) {
+        const card = CardFactory.adaptiveCard(result.adaptiveCard);
+        responseActivity.addAttachments(card);
     }
     
     await send(responseActivity);
   } catch (error) {
-    console.error(error);
+    console.error("Error in message handler:", error);
     await send("The agent encountered an error while processing your request with Gemini.");
   }
 });

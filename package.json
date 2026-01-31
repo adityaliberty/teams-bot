@@ -31,7 +31,8 @@
         "@microsoft/teams.ai": "^2.0.0",
         "@microsoft/teams.apps": "^2.0.0",
         "@microsoft/teams.common": "^2.0.0",
-        "@microsoft/teams.openai": "^2.0.0"
+        "@microsoft/teams.openai": "^2.0.0",
+        "botbuilder": "^4.23.3"
     },
     "devDependencies": {
         "@types/node": "^20.0.0",
