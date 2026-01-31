@@ -7,6 +7,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import * as fs from "fs";
 import * as path from "path";
 import config from "../config";
+import { convertA2UIToAdaptiveCard } from "./converter";
 
 // Create storage for conversation history
 const storage = new LocalStorage();
@@ -81,7 +82,7 @@ async function processWithGemini(conversationKey: string, input: string) {
     parsed = JSON.parse(responseText);
   } catch (e) {
     console.error("Failed to parse Gemini response:", responseText);
-    parsed = { text: responseText, adaptiveCard: null };
+    parsed = { text: responseText, a2ui: null };
   }
 
   // Update history
@@ -92,15 +93,17 @@ async function processWithGemini(conversationKey: string, input: string) {
   return parsed;
 }
 
-// Handle messages and Adaptive Card actions
+// Handle messages and actions
 app.on("message", async ({ send, activity }) => {
   const conversationKey = `${activity.conversation.id}/${activity.from.id}`;
   
   try {
     let input = activity.text;
     
-    // Handle Adaptive Card Action.Submit data
+    // Handle action submissions (from buttons or forms)
     if (!input && activity.value) {
+        // If it's a form submission, activity.value will contain the input values
+        // If it's a button click, activity.value will contain the action name
         input = `User performed action: ${JSON.stringify(activity.value)}`;
     }
 
@@ -112,10 +115,15 @@ app.on("message", async ({ send, activity }) => {
       .addAiGenerated()
       .addFeedback();
     
-    // Attach Adaptive Card if present
-    if (result.adaptiveCard) {
-        const card = CardFactory.adaptiveCard(result.adaptiveCard);
-        responseActivity.addAttachments(card);
+    // Convert A2UI to Adaptive Card for Teams
+    if (result.a2ui) {
+        try {
+            const adaptiveCardJson = convertA2UIToAdaptiveCard(result.a2ui);
+            const card = CardFactory.adaptiveCard(adaptiveCardJson);
+            responseActivity.addAttachments(card);
+        } catch (convError) {
+            console.error("Conversion error:", convError);
+        }
     }
     
     await send(responseActivity);
