@@ -1,13 +1,14 @@
 import { App } from "@microsoft/teams.apps";
 import { LocalStorage } from "@microsoft/teams.common";
 import { MessageActivity, TokenCredentials } from "@microsoft/teams.api";
-import { CardFactory } from "botbuilder";
+import { CardFactory, ActivityTypes } from "botbuilder";
+
 import { ManagedIdentityCredential } from "@azure/identity";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import * as fs from "fs";
 import * as path from "path";
 import config from "../config";
 import { convertA2UIToAdaptiveCard } from "./converter";
+import { GeminiProvider, AIProvider } from "./aiProvider";
 
 // Create storage for conversation history
 const storage = new LocalStorage();
@@ -20,14 +21,8 @@ function loadInstructions(): string {
 
 const instructions = loadInstructions();
 
-// Initialize Gemini
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY || "");
-const model = genAI.getGenerativeModel({ 
-  model: "gemini-2.0-flash",
-  generationConfig: {
-    responseMimeType: "application/json",
-  }
-});
+// Initialize AI Provider (Generic)
+const aiProvider: AIProvider = new GeminiProvider(process.env.GOOGLE_API_KEY || "");
 
 const createTokenFactory = () => {
   return async (
@@ -61,38 +56,6 @@ const app = new App({
   storage,
 });
 
-// Helper to process with Gemini
-async function processWithGemini(conversationKey: string, input: string) {
-  const history = storage.get(conversationKey) || [];
-  
-  const contents = [
-    { role: "user", parts: [{ text: `SYSTEM INSTRUCTIONS:\n${instructions}` }] },
-    ...history.map((msg: any) => ({
-      role: msg.role === "assistant" ? "model" : "user",
-      parts: [{ text: msg.content }]
-    })),
-    { role: "user", parts: [{ text: input }] }
-  ];
-
-  const result = await model.generateContent({ contents });
-  const responseText = result.response.text();
-  
-  let parsed;
-  try {
-    parsed = JSON.parse(responseText);
-  } catch (e) {
-    console.error("Failed to parse Gemini response:", responseText);
-    parsed = { text: responseText, a2ui: null };
-  }
-
-  // Update history
-  history.push({ role: "user", content: input });
-  history.push({ role: "assistant", content: JSON.stringify(parsed) });
-  storage.set(conversationKey, history);
-
-  return parsed;
-}
-
 // Handle messages and actions
 app.on("message", async ({ send, activity }) => {
   const conversationKey = `${activity.conversation.id}/${activity.from.id}`;
@@ -102,15 +65,25 @@ app.on("message", async ({ send, activity }) => {
     
     // Handle action submissions (from buttons or forms)
     if (!input && activity.value) {
-        // If it's a form submission, activity.value will contain the input values
-        // If it's a button click, activity.value will contain the action name
         input = `User performed action: ${JSON.stringify(activity.value)}`;
     }
 
     if (!input) return;
 
-    const result = await processWithGemini(conversationKey, input);
+    // 1. Send Typing Indicator (Loader)
+    const typingActivity = { type: ActivityTypes.Typing };
+    await send(typingActivity as any);
+
+    // 2. Process with AI Provider
+    const history = storage.get(conversationKey) || [];
+    const result = await aiProvider.generateResponse(history, input, instructions);
     
+    // Update history
+    history.push({ role: "user", content: input });
+    history.push({ role: "assistant", content: JSON.stringify(result) });
+    storage.set(conversationKey, history);
+
+    // 3. Prepare Response
     const responseActivity = new MessageActivity(result.text)
       .addAiGenerated()
       .addFeedback();
@@ -129,7 +102,7 @@ app.on("message", async ({ send, activity }) => {
     await send(responseActivity);
   } catch (error) {
     console.error("Error in message handler:", error);
-    await send("The agent encountered an error while processing your request with Gemini.");
+    await send("The agent encountered an error while processing your request.");
   }
 });
 

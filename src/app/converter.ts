@@ -42,12 +42,16 @@ export function convertA2UIToAdaptiveCard(a2ui: A2UIData): any {
                     type: 'Container',
                     style: 'emphasis',
                     bleed: true,
+                    separator: true,
+                    spacing: 'Medium',
                     items: [
                         {
                             type: 'TextBlock',
                             text: comp.properties?.title || '',
                             weight: 'Bolder',
-                            size: 'Medium'
+                            size: 'Large',
+                            wrap: true,
+                            color: 'Accent'
                         },
                         ...((comp.children || []).map(childId => renderComponent(childId)).filter(c => c !== null))
                     ]
@@ -63,9 +67,11 @@ export function convertA2UIToAdaptiveCard(a2ui: A2UIData): any {
             case 'Image':
                 return {
                     type: 'Image',
-                    url: comp.properties?.src || '',
-                    altText: comp.properties?.alt || '',
-                    size: 'Large'
+                    url: comp.properties?.src || 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=500', // Fallback image
+                    altText: comp.properties?.alt || 'Image',
+                    size: 'Large',
+                    style: 'default',
+                    horizontalAlignment: 'Center'
                 };
 
             case 'Button':
